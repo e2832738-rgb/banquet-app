@@ -1,4 +1,5 @@
 import json
+import re
 import random
 import gspread
 from google.oauth2.service_account import Credentials
@@ -6,22 +7,33 @@ import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (使用標準官方憑證解析)"""
+    """從 Google Sheets 載入菜單資料庫 (具備強健的憑證自我修復與重組機制)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     try:
         if "gcp_service_account" in st.secrets:
-            # 1. 直接將 st.secrets 轉為標準 dict
+            # 1. 取得 Streamlit Secrets 的字典副本
             service_account_info = dict(st.secrets["gcp_service_account"])
             
-            # 2. 確保 private_key 裡的字面量 \n 被還原為真實換行符號
-            if "private_key" in service_account_info:
-                pk = service_account_info["private_key"]
-                # 如果裏面包含字面上的 \n，將其轉為真實換行
-                if "\\n" in pk:
-                    service_account_info["private_key"] = pk.replace("\\n", "\n")
+            # 2. 強制修復與重組 private_key（徹底解決 Invalid symbol 61 錯誤）
+            raw_key = service_account_info.get("private_key", "")
+            
+            # 把所有可能出現的字面量 \n 或是真實換行、空白全部清除，只留純 Base64 字串
+            clean_key = raw_key.replace("-----BEGIN PRIVATE KEY-----", "")
+            clean_key = clean_key.replace("-----END PRIVATE KEY-----", "")
+            clean_key = clean_key.replace("\\n", "\n")
+            
+            # 過濾掉所有空白、換行與雜訊，只留下合法的 Base64 字元與填充符號 (=)
+            b64_only = "".join(c for c in clean_key if not c.isspace())
+            
+            # 嚴格依照 PEM 規範：每 64 個字元強制切一行
+            chunks = [b64_only[i:i+64] for i in range(0, len(b64_only), 64)]
+            formatted_key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(chunks) + "\n-----END PRIVATE KEY-----\n"
+            
+            # 將修復完成的金鑰覆寫回去
+            service_account_info["private_key"] = formatted_key
             
             creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
         else:
