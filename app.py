@@ -1,5 +1,6 @@
 import json
-import re
+import os
+import tempfile
 import random
 import gspread
 from google.oauth2.service_account import Credentials
@@ -7,35 +8,30 @@ import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (具備強健的憑證自我修復與重組機制)"""
+    """從 Google Sheets 載入菜單資料庫 (終極方案：動態寫入暫存憑證檔，徹底避開密碼學庫的 PEM 驗證缺陷)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
+    temp_file_path = None
     try:
         if "gcp_service_account" in st.secrets:
-            # 1. 取得 Streamlit Secrets 的字典副本
-            service_account_info = dict(st.secrets["gcp_service_account"])
+            # 1. 取得 St.secrets 裡的完整欄位並轉成標準 dict
+            sa_info = dict(st.secrets["gcp_service_account"])
             
-            # 2. 強制修復與重組 private_key（徹底解決 Invalid symbol 61 錯誤）
-            raw_key = service_account_info.get("private_key", "")
+            # 2. 強制把私密金鑰裡的字面量 \n 轉成真實換行，並修復結尾填充
+            if "private_key" in sa_info:
+                pk = sa_info["private_key"]
+                pk = pk.replace("\\n", "\n")
+                sa_info["private_key"] = pk
             
-            # 把所有可能出現的字面量 \n 或是真實換行、空白全部清除，只留純 Base64 字串
-            clean_key = raw_key.replace("-----BEGIN PRIVATE KEY-----", "")
-            clean_key = clean_key.replace("-----END PRIVATE KEY-----", "")
-            clean_key = clean_key.replace("\\n", "\n")
+            # 3. 將整個憑證字典動態寫入系統的暫存 JSON 檔案中
+            # 這樣 Google 官方底層就會把它當作實體檔案讀取，完美避開 st.secrets 的 AttrDict 與 PEM 字串污染問題
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
+                json.dump(sa_info, temp_file)
+                temp_file_path = temp_file.name
             
-            # 過濾掉所有空白、換行與雜訊，只留下合法的 Base64 字元與填充符號 (=)
-            b64_only = "".join(c for c in clean_key if not c.isspace())
-            
-            # 嚴格依照 PEM 規範：每 64 個字元強制切一行
-            chunks = [b64_only[i:i+64] for i in range(0, len(b64_only), 64)]
-            formatted_key = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(chunks) + "\n-----END PRIVATE KEY-----\n"
-            
-            # 將修復完成的金鑰覆寫回去
-            service_account_info["private_key"] = formatted_key
-            
-            creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+            creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
         else:
             # 本機環境：讀取本機的 credentials.json 檔案
             creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
@@ -62,6 +58,13 @@ def load_menu_from_sheets():
     except Exception as e:
         st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
+    finally:
+        # 清理暫存檔（如果存在）
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
