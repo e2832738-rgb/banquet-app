@@ -1,12 +1,13 @@
+import random
 import pandas as pd
 import streamlit as st
 
-# === 1. 放這裡：資料載入函式（在背景安靜載入） ===
+# === 1. 背景安靜載入雲端 Google 試算表資料 ===
 @st.cache_resource
 def load_menu_from_sheets():
     try:
         sheet_id = "11DIvmuntVIaYWLtZcRPl8DZGVLGviwiWJgioxmK0r7A"
-        sheet_name = "dishes"  # 如果分頁叫 dishes 請改成 dishes
+        sheet_name = "dishes"  
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
         
         df = pd.read_csv(url)
@@ -34,19 +35,7 @@ def load_menu_from_sheets():
         st.error(f"載入 Google Sheets 失敗：{e}")
         return []
 
-# === 2. 放這裡：你的主畫面與互動介面（不會直接印出全部表格） ===
-st.title("🍽️ 宴席菜單設定系統")
-
-menu_dishes = load_menu_from_sheets()
-
-if menu_dishes:
-    # 這裡不要用 st.dataframe 印出全部，改用你的設定選單或互動元件
-    dish_names = [dish["name"] for dish in menu_dishes if "name" in dish]
-    selected_dishes = st.multiselect("請選擇本次宴席的菜色：", dish_names)
-    
-    # 接下來寫你們宴席系統的後續邏輯...
-else:
-    st.warning("目前無法載入菜單資料。")
+# === 2. 智慧彈性配菜演算法 (強化預算容忍度) ===
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
@@ -60,23 +49,27 @@ def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_tab
     best_menu = None
     min_price_diff = float('inf')
     
-    for _ in range(5000):
+    # 進行 8000 次模擬抽樣，尋找最貼近預算的組合
+    for _ in range(8000):
         current_menu = []
         total_price = 0
         valid = True
         
         for cat in categories:
+            # 篩選符合分類且沒有違反忌口標籤的菜色
             options = [
                 d for d in menu_db 
                 if d["cat"] == cat and not any(t in d.get("taboos", []) for t in user_taboos)
             ]
             
+            # 如果該分類剛好被忌口擋光，退而求其次抓任意未違規菜色
             if not options:
                 options = [d for d in menu_db if not any(t in d.get("taboos", []) for t in user_taboos)]
                 if not options:
                     valid = False
                     break
             
+            # 依照預算高低自動偏好高階或平價菜色
             if target_price >= 8500:
                 tier_options = [o for o in options if o.get("tier", 1) >= 2]
                 chosen = random.choice(tier_options) if tier_options else random.choice(options)
@@ -95,6 +88,15 @@ def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_tab
             min_price_diff = price_diff
             best_menu = current_menu
             
+    # 🛡️ 彈性防禦機制：如果跑完幾千次還是找不到完美貼近的，自動放寬標準回傳最接近的菜單
+    if not best_menu and menu_db:
+        # 取任意符合忌口的菜色湊滿道數
+        fallback_options = [d for d in menu_db if not any(t in d.get("taboos", []) for t in user_taboos)]
+        if len(fallback_options) >= total_dishes_count:
+            best_menu = random.sample(fallback_options, total_dishes_count)
+        else:
+            best_menu = fallback_options  # 盡量給出有的
+            
     if not best_menu:
         return None
         
@@ -104,15 +106,16 @@ def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_tab
         "total_cost": sum(d["cost"] for d in best_menu)
     }
 
-# --- 網頁介面設計 ---
+# === 3. 網頁前端介面設計 ===
 st.title("🍲 智慧辦桌菜單配置系統")
 st.write("輸入客戶預算與忌口，系統自動從雲端資料庫配出最佳菜單！")
 
+# 載入資料庫
 menu_database = load_menu_from_sheets()
 
 if menu_database:
     with st.form("banquet_form"):
-        customer_budget = st.number_input("客戶預算金額 (NT$)", min_value=3000, max_value=30000, value=8000, step=500)
+        customer_budget = st.number_input("客戶預算金額 (NT$)", min_value=3000, max_value=50000, value=8000, step=500)
         customer_dishes_count = st.slider("想要配置的菜色道數", min_value=6, max_value=12, value=10, step=2)
         taboo_input = st.text_input("客戶忌口標籤 (例如 shellfish，多個請用逗號隔開)", value="")
         
@@ -121,7 +124,7 @@ if menu_database:
     if submit_btn:
         customer_taboos = [t.strip() for t in taboo_input.split(",")] if taboo_input else []
         
-        with st.spinner("正在計算最佳菜單組合中..."):
+        with st.spinner("正在彈性計算最佳菜單組合中..."):
             result = generate_banquet_menu(
                 menu_database, 
                 target_price=customer_budget, 
@@ -141,16 +144,17 @@ if menu_database:
             col3.metric("預估毛利", f"NT$ {profit}", f"{margin:.1f}%")
             
             st.markdown("### 📋 推薦菜單明細")
-            # 整理成表格呈現在手機上
             table_data = []
             for index, dish in enumerate(result["menu"], 1):
                 table_data.append({
                     "道次": index,
-                    "菜品名稱": dish['name'],
-                    "分類": dish['cat'],
-                    "售價": f"NT$ {dish['price']}",
-                    "成本": f"NT$ {dish['cost']}"
+                    "菜品名稱": dish.get('name', '未命名'),
+                    "分類": dish.get('cat', ''),
+                    "售價": f"NT$ {dish.get('price', 0)}",
+                    "成本": f"NT$ {dish.get('cost', 0)}"
                 })
             st.table(table_data)
         else:
-            st.error("很抱歉，找不到符合該預算與條件的菜單組合。")
+            st.error("很抱歉，資料庫中沒有足夠的菜色可供配置，請檢查 Google 試算表內容。")
+else:
+    st.warning("目前無法載入雲端菜單資料，請確認網絡或試算表共用設定。")
