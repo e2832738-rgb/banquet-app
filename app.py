@@ -8,25 +8,19 @@ import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (終極方案：動態寫入暫存憑證檔，徹底避開密碼學庫的 PEM 驗證缺陷)"""
+    """從 Google Sheets 載入菜單資料庫 (透過單行 JSON 字串與暫存檔避開 TOML 解析缺陷)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     temp_file_path = None
     try:
-        if "gcp_service_account" in st.secrets:
-            # 1. 取得 St.secrets 裡的完整欄位並轉成標準 dict
-            sa_info = dict(st.secrets["gcp_service_account"])
+        if "gcp_json_str" in st.secrets:
+            # 1. 直接將 Secrets 裡的單行 JSON 字串還原為 Python 字典
+            json_str = st.secrets["gcp_json_str"]
+            sa_info = json.loads(json_str)
             
-            # 2. 強制把私密金鑰裡的字面量 \n 轉成真實換行，並修復結尾填充
-            if "private_key" in sa_info:
-                pk = sa_info["private_key"]
-                pk = pk.replace("\\n", "\n")
-                sa_info["private_key"] = pk
-            
-            # 3. 將整個憑證字典動態寫入系統的暫存 JSON 檔案中
-            # 這樣 Google 官方底層就會把它當作實體檔案讀取，完美避開 st.secrets 的 AttrDict 與 PEM 字串污染問題
+            # 2. 寫入暫存檔讓 Google 認證以實體檔案讀取
             with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
                 json.dump(sa_info, temp_file)
                 temp_file_path = temp_file.name
@@ -59,7 +53,6 @@ def load_menu_from_sheets():
         st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
     finally:
-        # 清理暫存檔（如果存在）
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
