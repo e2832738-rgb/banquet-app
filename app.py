@@ -1,24 +1,29 @@
-import json
+import re
 import random
 import gspread
 from google.oauth2.service_account import Credentials
 import streamlit as st
 
-# 設定網頁標題與排版
-st.set_page_config(page_title="辦桌菜色自動配置系統", page_icon="🍲", layout="centered")
-
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (支援本地 credentials.json 與雲端 st.secrets)"""
+    """從 Google Sheets 載入菜單資料庫 (自動清洗與標準化雲端憑證)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     try:
-        # 雲端與本地兼容的憑證讀取邏輯
         if "gcp_service_account" in st.secrets:
-            # 雲端環境：從 Streamlit 秘密金鑰中解析
-            service_account_info = json.loads(st.secrets["gcp_service_account"])
+            # 💡 直接將 st.secrets 轉為標準字典（千萬不能用 json.loads()）
+            service_account_info = dict(st.secrets["gcp_service_account"])
+            
+            # 🛡️ 自動清洗並重新格式化 private_key，徹底解決 PEM 解析錯誤
+            raw_pk = service_account_info.get("private_key", "")
+            match = re.search(r"-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----", raw_pk, re.DOTALL)
+            if match:
+                b64_content = "".join(match.group(1).split())
+                formatted_b64 = "\n".join(b64_content[i:i+64] for i in range(0, len(b64_content), 64))
+                service_account_info["private_key"] = f"-----BEGIN PRIVATE KEY-----\n{formatted_b64}\n-----END PRIVATE KEY-----\n"
+            
             creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
         else:
             # 本機環境：讀取本機的 credentials.json 檔案
@@ -46,7 +51,6 @@ def load_menu_from_sheets():
     except Exception as e:
         st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
-
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
