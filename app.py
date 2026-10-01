@@ -6,23 +6,32 @@ import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (自動清洗與標準化雲端憑證)"""
+    """從 Google Sheets 載入菜單資料庫 (具備企業級防禦機制的憑證解析器)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     try:
         if "gcp_service_account" in st.secrets:
-            # 💡 直接將 st.secrets 轉為標準字典（千萬不能用 json.loads()）
+            # 1. 取得 Streamlit Secrets 的字典資料
             service_account_info = dict(st.secrets["gcp_service_account"])
             
-            # 🛡️ 自動清洗並重新格式化 private_key，徹底解決 PEM 解析錯誤
+            # 2. 企業級金鑰清洗與標準化 (解決所有 Base64 偏移與 PEM 載入失敗問題)
             raw_pk = service_account_info.get("private_key", "")
+            
+            # 處理可能殘留的字面量反斜線 n (\n)
+            if "\\n" in raw_pk:
+                raw_pk = raw_pk.replace("\\n", "\n")
+                
+            # 萃取出標頭與結尾之間的純 Base64 字串
             match = re.search(r"-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----", raw_pk, re.DOTALL)
             if match:
-                b64_content = "".join(match.group(1).split())
-                formatted_b64 = "\n".join(b64_content[i:i+64] for i in range(0, len(b64_content), 64))
-                service_account_info["private_key"] = f"-----BEGIN PRIVATE KEY-----\n{formatted_b64}\n-----END PRIVATE KEY-----\n"
+                # 濾除所有空白、換行與雜訊
+                b64_clean = "".join(match.group(1).split())
+                # 嚴格依照標準規範：每 64 個字元切行重新組裝
+                chunks = [b64_clean[i:i+64] for i in range(0, len(b64_clean), 64)]
+                standard_pk = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(chunks) + "\n-----END PRIVATE KEY-----\n"
+                service_account_info["private_key"] = standard_pk
             
             creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
         else:
