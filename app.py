@@ -1,3 +1,4 @@
+import json
 import random
 import gspread
 from google.oauth2.service_account import Credentials
@@ -8,13 +9,21 @@ st.set_page_config(page_title="辦桌菜色自動配置系統", page_icon="🍲"
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (加上快取避免重複讀取)"""
+    """從 Google Sheets 載入菜單資料庫 (支援本地 credentials.json 與雲端 st.secrets)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     try:
-        creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+        # 雲端與本地兼容的憑證讀取邏輯
+        if "gcp_service_account" in st.secrets:
+            # 雲端環境：從 Streamlit 秘密金鑰中解析
+            service_account_info = json.loads(st.secrets["gcp_service_account"])
+            creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
+        else:
+            # 本機環境：讀取本機的 credentials.json 檔案
+            creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+            
         client = gspread.authorize(creds)
         spreadsheet = client.open("banquet_db")
         sheet = spreadsheet.worksheet("dishes")
@@ -35,7 +44,7 @@ def load_menu_from_sheets():
                 active_dishes.append(dish)
         return active_dishes
     except Exception as e:
-        st.error(f"載入 Google Sheets 失敗，請檢查憑證：{e}")
+        st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
 
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
@@ -128,7 +137,7 @@ if menu_database:
             col1.metric("總售價", f"NT$ {result['total_price']}")
             col2.metric("總成本", f"NT$ {result['total_cost']}")
             profit = result['total_price'] - result['total_cost']
-            margin = (profit / result['total_price']) * 100
+            margin = (profit / result['total_price']) * 100 if result['total_price'] > 0 else 0
             col3.metric("預估毛利", f"NT$ {profit}", f"{margin:.1f}%")
             
             st.markdown("### 📋 推薦菜單明細")
