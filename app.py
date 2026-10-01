@@ -1,53 +1,42 @@
 import json
 import os
 import tempfile
-import re
 import gspread
 from google.oauth2.service_account import Credentials
 import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (具備極致防禦力的憑證自動精準裁切與消毒)"""
+    """從 Google Sheets 載入菜單資料庫 (透過單行 JSON 字串與暫存檔，徹底避開 TOML 解析缺陷)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     temp_file_path = None
     try:
-        if "gcp_service_account" in st.secrets:
-            # 轉換為標準字典
-            sa_info = dict(st.secrets["gcp_service_account"])
+        # 檢查是否有設定單行 JSON 字串
+        if "gcp_json_str" in st.secrets:
+            json_str = st.secrets["gcp_json_str"]
+            sa_info = json.loads(json_str)
             
-            # 🛡️ 強力消毒 private_key：精準萃取合法金鑰範圍，徹底根絕 extra data 錯誤
-            raw_pk = sa_info.get("private_key", "")
-            
-            # 將字面量 \n 轉為真實換行
-            if "\\n" in raw_pk and "\n" not in raw_pk:
-                raw_pk = raw_pk.replace("\\n", "\n")
-                
-            # 利用正規表達式精準抓出標頭與結尾之間的純 Base64 內容，自動丟棄所有前後雜訊
-            match = re.search(r"-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----", raw_pk, re.DOTALL)
-            if match:
-                b64_content = "".join(match.group(1).split())
-                # 每 64 個字元標準換行重建
-                chunks = [b64_content[i:i+64] for i in range(0, len(b64_content), 64)]
-                sa_info["private_key"] = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(chunks) + "\n-----END PRIVATE KEY-----\n"
-            else:
-                # 備用：如果沒有標頭，手動強制清理前後空白
-                sa_info["private_key"] = raw_pk.strip()
-
-            # 動態寫入暫存 JSON 檔以檔案形式認證
+            # 寫入暫存檔讓 Google 認證以實體檔案讀取，完美避開 cryptography 的 PEM 解析限制
             with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
                 json.dump(sa_info, temp_file)
                 temp_file_path = temp_file.name
             
             creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
+        elif "gcp_service_account" in st.secrets:
+            # 兼容舊的 TOML 區段
+            sa_info = dict(st.secrets["gcp_service_account"])
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
+                json.dump(sa_info, temp_file)
+                temp_file_path = temp_file.name
+            creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
         else:
             if os.path.exists("credentials.json"):
                 creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
             else:
-                raise FileNotFoundError("找不到 Streamlit Secrets 憑證設定，且本地端也缺少 credentials.json 檔案！")
+                raise FileNotFoundError("找不到 Streamlit Secrets 憑證設定，且本地端也缺少 credentials.json！")
             
         client = gspread.authorize(creds)
         spreadsheet = client.open("banquet_db")
