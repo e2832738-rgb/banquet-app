@@ -1,53 +1,30 @@
-import json
-import os
-import tempfile
-import gspread
-from google.oauth2.service_account import Credentials
+import pandas as pd
 import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (透過單行 JSON 字串與暫存檔，徹底避開 TOML 解析缺陷)"""
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    temp_file_path = None
+    
     try:
-        # 檢查是否有設定單行 JSON 字串
-        if "gcp_json_str" in st.secrets:
-            json_str = st.secrets["gcp_json_str"]
-            sa_info = json.loads(json_str)
-            
-            # 寫入暫存檔讓 Google 認證以實體檔案讀取，完美避開 cryptography 的 PEM 解析限制
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
-                json.dump(sa_info, temp_file)
-                temp_file_path = temp_file.name
-            
-            creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
-        elif "gcp_service_account" in st.secrets:
-            # 兼容舊的 TOML 區段
-            sa_info = dict(st.secrets["gcp_service_account"])
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
-                json.dump(sa_info, temp_file)
-                temp_file_path = temp_file.name
-            creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
-        else:
-            if os.path.exists("credentials.json"):
-                creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
-            else:
-                raise FileNotFoundError("找不到 Streamlit Secrets 憑證設定，且本地端也缺少 credentials.json！")
-            
-        client = gspread.authorize(creds)
-        spreadsheet = client.open("banquet_db")
-        sheet = spreadsheet.worksheet("dishes")
         
-        all_dishes = sheet.get_all_records()
+        sheet_id = "11DIvmuntVIaYWLtZcRPl8DZGVLGviwiWJgioxmK0r7A"
+      
+        sheet_name = "dishes" 
+        
+        url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+        
+       
+        df = pd.read_csv(url)
+        all_dishes = df.to_dict(orient="records")
+        
         active_dishes = []
         for dish in all_dishes:
             is_active = dish.get("active")
             if isinstance(is_active, str):
                 is_active = is_active.strip().upper() == "TRUE"
+            elif isinstance(is_active, bool):
+                pass
+            else:
+                is_active = False
             
             if is_active:
                 taboos_raw = dish.get("taboos", "")
@@ -58,14 +35,20 @@ def load_menu_from_sheets():
                 active_dishes.append(dish)
         return active_dishes
     except Exception as e:
-        st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
+        st.error(f"載入 Google Sheets 失敗，請檢查網址或工作表名稱：{e}")
         return []
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except:
-                pass
+
+
+st.title("🍽️ 宴席菜單設定系統")
+
+dishes = load_menu_from_sheets()
+
+if dishes:
+    st.success(f"成功載入 {len(dishes)} 道上架菜色！")
+    # 顯示為表格供確認
+    st.dataframe(pd.DataFrame(dishes))
+else:
+    st.warning("目前沒有載入任何菜色，請檢查 Google 試算表是否已設為「知道連結的人皆可檢視」以及工作表名稱是否正確。")
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
