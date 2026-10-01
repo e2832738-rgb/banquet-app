@@ -1,18 +1,14 @@
 import pandas as pd
 import streamlit as st
 
+# === 1. 放這裡：資料載入函式（在背景安靜載入） ===
 @st.cache_resource
 def load_menu_from_sheets():
-    
     try:
-        
         sheet_id = "11DIvmuntVIaYWLtZcRPl8DZGVLGviwiWJgioxmK0r7A"
-      
-        sheet_name = "dishes" 
-        
+        sheet_name = "工作表1"  # 如果分頁叫 dishes 請改成 dishes
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
         
-       
         df = pd.read_csv(url)
         all_dishes = df.to_dict(orient="records")
         
@@ -35,20 +31,22 @@ def load_menu_from_sheets():
                 active_dishes.append(dish)
         return active_dishes
     except Exception as e:
-        st.error(f"載入 Google Sheets 失敗，請檢查網址或工作表名稱：{e}")
+        st.error(f"載入 Google Sheets 失敗：{e}")
         return []
 
-
+# === 2. 放這裡：你的主畫面與互動介面（不會直接印出全部表格） ===
 st.title("🍽️ 宴席菜單設定系統")
 
-dishes = load_menu_from_sheets()
+menu_dishes = load_menu_from_sheets()
 
-if dishes:
-    st.success(f"成功載入 {len(dishes)} 道上架菜色！")
-    # 顯示為表格供確認
-    st.dataframe(pd.DataFrame(dishes))
+if menu_dishes:
+    # 這裡不要用 st.dataframe 印出全部，改用你的設定選單或互動元件
+    dish_names = [dish["name"] for dish in menu_dishes if "name" in dish]
+    selected_dishes = st.multiselect("請選擇本次宴席的菜色：", dish_names)
+    
+    # 接下來寫你們宴席系統的後續邏輯...
 else:
-    st.warning("目前沒有載入任何菜色，請檢查 Google 試算表是否已設為「知道連結的人皆可檢視」以及工作表名稱是否正確。")
+    st.warning("目前無法載入菜單資料。")
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
