@@ -107,7 +107,7 @@ def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_tab
     }
 
 # === 3. 網頁前端介面設計 ===
-st.title("🍲 智慧辦桌菜單配置系統")
+st.title("🍲 黃家外燴菜色配置系統")
 st.write("輸入客戶預算與忌口，系統自動從雲端資料庫配出最佳菜單！")
 
 # 載入資料庫
