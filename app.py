@@ -1,4 +1,4 @@
-import re
+import json
 import random
 import gspread
 from google.oauth2.service_account import Credentials
@@ -6,41 +6,22 @@ import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (具備極致防禦力的憑證自動清洗器)"""
+    """從 Google Sheets 載入菜單資料庫 (使用標準官方憑證解析)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     try:
         if "gcp_service_account" in st.secrets:
-            # 1. 取得 Streamlit Secrets 的字典資料
+            # 1. 直接將 st.secrets 轉為標準 dict
             service_account_info = dict(st.secrets["gcp_service_account"])
             
-            # 2. 取得原始 private_key 並進行全方位清洗
-            raw_pk = service_account_info.get("private_key", "")
-            
-            # 將字面量的 \n 轉換為真實換行
-            if "\\n" in raw_pk:
-                raw_pk = raw_pk.replace("\\n", "\n")
-                
-            # 無條件拔除所有 PEM 標頭與結尾文字，只萃取中間的純文字與 Base64 內容
-            clean_text = raw_pk.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "")
-            
-            # 嚴格過濾：只保留合法的 Base64 字元（A-Z, a-z, 0-9, +, /, =）
-            # 這樣可以徹底清除所有偏移量錯誤與非法的 symbol 61
-            b64_chars = "".join(c for c in clean_text if c.isalnum() or c in "+/=")
-            
-            # 為了防止中間不小心夾雜 `=` 造成解析中斷，我們把中間的 `=` 先移除，只在結尾補上標準的 padding
-            b64_pure = b64_chars.replace("=", "")
-            padding_needed = (-len(b64_pure)) % 4
-            b64_final = b64_pure + "=" * padding_needed
-            
-            # 嚴格依照標準規範：每 64 個字元切一行重新組裝成完美的 PEM 格式
-            chunks = [b64_final[i:i+64] for i in range(0, len(b64_final), 64)]
-            standard_pk = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(chunks) + "\n-----END PRIVATE KEY-----\n"
-            
-            # 寫回清洗後的標準金鑰
-            service_account_info["private_key"] = standard_pk
+            # 2. 確保 private_key 裡的字面量 \n 被還原為真實換行符號
+            if "private_key" in service_account_info:
+                pk = service_account_info["private_key"]
+                # 如果裏面包含字面上的 \n，將其轉為真實換行
+                if "\\n" in pk:
+                    service_account_info["private_key"] = pk.replace("\\n", "\n")
             
             creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
         else:
