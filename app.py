@@ -6,7 +6,7 @@ import streamlit as st
 def load_menu_from_sheets():
     try:
         sheet_id = "11DIvmuntVIaYWLtZcRPl8DZGVLGviwiWJgioxmK0r7A"
-        sheet_name = "工作表1"  # 如果分頁叫 dishes 請改成 dishes
+        sheet_name = "dishes"  # 如果分頁叫 dishes 請改成 dishes
         url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
         
         df = pd.read_csv(url)
