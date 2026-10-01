@@ -17,8 +17,8 @@ def load_menu_from_sheets():
     try:
         # 雲端與本地兼容的憑證讀取邏輯
         if "gcp_service_account" in st.secrets:
-            # 雲端環境：從 Streamlit 秘密金鑰中解析
-            service_account_info = json.loads(st.secrets["gcp_service_account"])
+            # 雲端環境：直接讀取 st.secrets 區段並轉為標準字典
+            service_account_info = dict(st.secrets["gcp_service_account"])
             creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
         else:
             # 本機環境：讀取本機的 credentials.json 檔案
@@ -46,7 +46,6 @@ def load_menu_from_sheets():
     except Exception as e:
         st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
-
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
