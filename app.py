@@ -1,32 +1,44 @@
 import json
 import os
 import tempfile
-import random
 import gspread
 from google.oauth2.service_account import Credentials
 import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (強制支援多種憑證格式容錯)"""
+    """從 Google Sheets 載入菜單資料庫 (具備智慧暫存與絕對路徑防禦)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
+    temp_file_path = None
     try:
+        # 檢查 Streamlit Secrets 裡面是否有設定
         if "gcp_service_account" in st.secrets:
-            # 直接讀取 st.secrets 內的設定轉為字典
+            # 轉換為標準字典
             sa_info = dict(st.secrets["gcp_service_account"])
             
-            # 確保 private_key 的換行符號正常
+            # 確保 private_key 的換行正確無誤
             if "private_key" in sa_info:
-                sa_info["private_key"] = sa_info["private_key"].strip()
-                if "\\n" in sa_info["private_key"] and "\n" not in sa_info["private_key"]:
-                    sa_info["private_key"] = sa_info["private_key"].replace("\\n", "\n")
+                pk = sa_info["private_key"].strip()
+                if "\\n" in pk and "\n" not in pk:
+                    pk = pk.replace("\\n", "\n")
+                sa_info["private_key"] = pk
 
-            creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
+            # 💡 為了徹底避免 cryptography / gspread 的型態與路徑相容性問題
+            # 我們直接將這組乾淨的字典動態寫入伺服器暫存 JSON 檔，以檔案形式進行安全認證
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
+                json.dump(sa_info, temp_file)
+                temp_file_path = temp_file.name
+            
+            creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
         else:
-            creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+            # 本機環境備援：尋找本機的 credentials.json
+            if os.path.exists("credentials.json"):
+                creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+            else:
+                raise FileNotFoundError("找不到 Streamlit Secrets 憑證設定，且本地端也缺少 credentials.json 檔案！")
             
         client = gspread.authorize(creds)
         spreadsheet = client.open("banquet_db")
@@ -50,6 +62,13 @@ def load_menu_from_sheets():
     except Exception as e:
         st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
+    finally:
+        # 確保用完後清除暫存檔
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
