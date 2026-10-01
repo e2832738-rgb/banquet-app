@@ -1,40 +1,49 @@
 import json
 import os
 import tempfile
+import re
 import gspread
 from google.oauth2.service_account import Credentials
 import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (具備智慧暫存與絕對路徑防禦)"""
+    """從 Google Sheets 載入菜單資料庫 (具備極致防禦力的憑證自動精準裁切與消毒)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
     temp_file_path = None
     try:
-        # 檢查 Streamlit Secrets 裡面是否有設定
         if "gcp_service_account" in st.secrets:
             # 轉換為標準字典
             sa_info = dict(st.secrets["gcp_service_account"])
             
-            # 確保 private_key 的換行正確無誤
-            if "private_key" in sa_info:
-                pk = sa_info["private_key"].strip()
-                if "\\n" in pk and "\n" not in pk:
-                    pk = pk.replace("\\n", "\n")
-                sa_info["private_key"] = pk
+            # 🛡️ 強力消毒 private_key：精準萃取合法金鑰範圍，徹底根絕 extra data 錯誤
+            raw_pk = sa_info.get("private_key", "")
+            
+            # 將字面量 \n 轉為真實換行
+            if "\\n" in raw_pk and "\n" not in raw_pk:
+                raw_pk = raw_pk.replace("\\n", "\n")
+                
+            # 利用正規表達式精準抓出標頭與結尾之間的純 Base64 內容，自動丟棄所有前後雜訊
+            match = re.search(r"-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----", raw_pk, re.DOTALL)
+            if match:
+                b64_content = "".join(match.group(1).split())
+                # 每 64 個字元標準換行重建
+                chunks = [b64_content[i:i+64] for i in range(0, len(b64_content), 64)]
+                sa_info["private_key"] = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(chunks) + "\n-----END PRIVATE KEY-----\n"
+            else:
+                # 備用：如果沒有標頭，手動強制清理前後空白
+                sa_info["private_key"] = raw_pk.strip()
 
-            # 💡 為了徹底避免 cryptography / gspread 的型態與路徑相容性問題
-            # 我們直接將這組乾淨的字典動態寫入伺服器暫存 JSON 檔，以檔案形式進行安全認證
+            # 動態寫入暫存 JSON 檔以檔案形式認證
             with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
                 json.dump(sa_info, temp_file)
                 temp_file_path = temp_file.name
             
             creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
         else:
-            # 本機環境備援：尋找本機的 credentials.json
             if os.path.exists("credentials.json"):
                 creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
             else:
@@ -63,7 +72,6 @@ def load_menu_from_sheets():
         st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
     finally:
-        # 確保用完後清除暫存檔
         if temp_file_path and os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
