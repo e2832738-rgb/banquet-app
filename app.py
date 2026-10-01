@@ -8,26 +8,24 @@ import streamlit as st
 
 @st.cache_resource
 def load_menu_from_sheets():
-    """從 Google Sheets 載入菜單資料庫 (透過單行 JSON 字串與暫存檔避開 TOML 解析缺陷)"""
+    """從 Google Sheets 載入菜單資料庫 (強制支援多種憑證格式容錯)"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    temp_file_path = None
     try:
-        if "gcp_json_str" in st.secrets:
-            # 1. 直接將 Secrets 裡的單行 JSON 字串還原為 Python 字典
-            json_str = st.secrets["gcp_json_str"]
-            sa_info = json.loads(json_str)
+        if "gcp_service_account" in st.secrets:
+            # 直接讀取 st.secrets 內的設定轉為字典
+            sa_info = dict(st.secrets["gcp_service_account"])
             
-            # 2. 寫入暫存檔讓 Google 認證以實體檔案讀取
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
-                json.dump(sa_info, temp_file)
-                temp_file_path = temp_file.name
-            
-            creds = Credentials.from_service_account_file(temp_file_path, scopes=scopes)
+            # 確保 private_key 的換行符號正常
+            if "private_key" in sa_info:
+                sa_info["private_key"] = sa_info["private_key"].strip()
+                if "\\n" in sa_info["private_key"] and "\n" not in sa_info["private_key"]:
+                    sa_info["private_key"] = sa_info["private_key"].replace("\\n", "\n")
+
+            creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
         else:
-            # 本機環境：讀取本機的 credentials.json 檔案
             creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
             
         client = gspread.authorize(creds)
@@ -52,12 +50,6 @@ def load_menu_from_sheets():
     except Exception as e:
         st.error(f"載入 Google Sheets 失敗，請檢查憑證或連線：{e}")
         return []
-    finally:
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.remove(temp_file_path)
-            except:
-                pass
 def generate_banquet_menu(menu_db, target_price, total_dishes_count=10, user_taboos=None):
     if user_taboos is None:
         user_taboos = []
